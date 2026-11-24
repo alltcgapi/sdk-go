@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        go: ['1.23.x', '1.24.x', '1.25.x']
+        include:
+          - os: windows-latest
+            go: '1.24.x'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+      - name: gofmt
+        shell: bash
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go vet ./...
+      - run: go test -race -cover ./...
+
+  fresh-consumer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - name: build a module that imports the SDK from this checkout
+        run: |
+          mkdir /tmp/consumer && cd /tmp/consumer
+          go mod init consumer
+          go mod edit -replace github.com/alltcgapi/sdk-go="$GITHUB_WORKSPACE"
+          cat > main.go <<'GO'
+          package main
+
+          import (
+          	"fmt"
+
+          	alltcgapi "github.com/alltcgapi/sdk-go"
+          )
+
+          func main() {
+          	client := alltcgapi.New(alltcgapi.WithAPIKey("x"))
+          	fmt.Println(client != nil, alltcgapi.Version)
+          }
+          GO
+          go get github.com/alltcgapi/sdk-go
+          go build ./... && go run .
